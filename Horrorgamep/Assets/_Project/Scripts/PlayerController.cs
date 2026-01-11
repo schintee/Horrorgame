@@ -1,85 +1,169 @@
 ﻿using UnityEngine;
 
+[RequireComponent(typeof(CharacterController))]
 public class PlayerController : MonoBehaviour
 {
     [Header("Movement Settings")]
-    [SerializeField] private float moveSpeed = 5f;        // Viteza de mișcare
-    [SerializeField] private float sprintMultiplier = 1.5f; // Cât de rapid alergi (Shift)
+    [SerializeField] private float walkSpeed = 3f;
+    [SerializeField] private float sprintSpeed = 6f;
+    [SerializeField] private float gravity = -15f;
+    [SerializeField] private float jumpHeight = 1.5f;
 
-    [Header("Mouse Look Settings")]
-    [SerializeField] private float mouseSensitivity = 2f;  // Sensibilitate mouse
-    [SerializeField] private Transform cameraTransform;    // Referință la camera player-ului
+    [Header("Look Settings")]
+    [SerializeField] private float mouseSensitivity = 2f;
+    [SerializeField] private float lookXLimit = 85f;
 
-    private Rigidbody rb;
-    private float verticalRotation = 0f;  // Pentru rotație camera sus/jos
+    [Header("Stamina Settings")]
+    [SerializeField] private float maxStamina = 100f;
+    [SerializeField] private float staminaDrainRate = 20f;
+    [SerializeField] private float staminaRegenRate = 15f;
+
+    [Header("Audio")]
+    [SerializeField] private AudioSource footstepAudio;
+    [SerializeField] private AudioClip[] footstepSounds;
+    [SerializeField] private float footstepInterval = 0.5f;
+
+    // Components
+    private CharacterController controller;
+    private Camera playerCamera;
+
+    // State
+    private Vector3 moveDirection = Vector3.zero;
+    private float rotationX = 0;
+    private float currentStamina;
+    private bool canMove = true;
+    private float footstepTimer = 0f;
+
+    // Public properties
+    public bool IsMoving { get; private set; }
+    public bool IsSprinting { get; private set; }
+    public float StaminaPercent => currentStamina / maxStamina;
 
     void Start()
     {
-        rb = GetComponent<Rigidbody>();
+        controller = GetComponent<CharacterController>();
+        playerCamera = GetComponentInChildren<Camera>();
 
-        // Ascunde și blochează cursorul în mijlocul ecranului
+        if (playerCamera == null)
+        {
+            playerCamera = Camera.main;
+        }
+
+        currentStamina = maxStamina;
+
+        // Lock and hide cursor
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
-
-        // Dacă nu ai setat camera în Inspector, o găsim automat
-        if (cameraTransform == null)
-        {
-            cameraTransform = GetComponentInChildren<Camera>().transform;
-        }
     }
 
     void Update()
     {
-        // MIȘCARE WASD
+        if (!canMove) return;
+
         HandleMovement();
+        HandleLook();
+        HandleStamina();
+        HandleFootsteps();
+    }
 
-        // ROTAȚIE MOUSE
-        HandleMouseLook();
+    private void HandleMovement()
+    {
+        // Get input
+        float horizontal = Input.GetAxis("Horizontal");
+        float vertical = Input.GetAxis("Vertical");
 
-        // ESC pentru a debloca cursorul (debug)
-        if (Input.GetKeyDown(KeyCode.Escape))
+        Vector3 forward = transform.TransformDirection(Vector3.forward);
+        Vector3 right = transform.TransformDirection(Vector3.right);
+
+        // Check if sprinting
+        bool wantsToSprint = Input.GetKey(KeyCode.LeftShift) && currentStamina > 0;
+        IsSprinting = wantsToSprint && vertical > 0; // Can only sprint forward
+
+        float currentSpeed = IsSprinting ? sprintSpeed : walkSpeed;
+        float movementDirectionY = moveDirection.y;
+
+        moveDirection = (forward * vertical + right * horizontal) * currentSpeed;
+
+        // Check if moving
+        IsMoving = horizontal != 0 || vertical != 0;
+
+        // Jump
+        if (Input.GetButtonDown("Jump") && controller.isGrounded)
         {
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
+            moveDirection.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
+        }
+        else
+        {
+            moveDirection.y = movementDirectionY;
+        }
+
+        // Apply gravity
+        if (!controller.isGrounded)
+        {
+            moveDirection.y += gravity * Time.deltaTime;
+        }
+
+        // Move
+        controller.Move(moveDirection * Time.deltaTime);
+    }
+
+    private void HandleLook()
+    {
+        rotationX -= Input.GetAxis("Mouse Y") * mouseSensitivity;
+        rotationX = Mathf.Clamp(rotationX, -lookXLimit, lookXLimit);
+
+        playerCamera.transform.localRotation = Quaternion.Euler(rotationX, 0, 0);
+        transform.rotation *= Quaternion.Euler(0, Input.GetAxis("Mouse X") * mouseSensitivity, 0);
+    }
+
+    private void HandleStamina()
+    {
+        if (IsSprinting && IsMoving)
+        {
+            currentStamina -= staminaDrainRate * Time.deltaTime;
+            currentStamina = Mathf.Max(currentStamina, 0);
+        }
+        else if (currentStamina < maxStamina)
+        {
+            currentStamina += staminaRegenRate * Time.deltaTime;
+            currentStamina = Mathf.Min(currentStamina, maxStamina);
         }
     }
 
-    void HandleMovement()
+    private void HandleFootsteps()
     {
-        // Input WASD (Horizontal = A/D, Vertical = W/S)
-        float horizontal = Input.GetAxisRaw("Horizontal"); // A/D
-        float vertical = Input.GetAxisRaw("Vertical");     // W/S
+        if (!controller.isGrounded || !IsMoving || footstepAudio == null || footstepSounds.Length == 0)
+            return;
 
-        // Direcția de mișcare relativă la unde ne uităm
-        Vector3 direction = transform.right * horizontal + transform.forward * vertical;
-        direction.Normalize(); // Normalizăm ca să nu mergem mai rapid diagonal
+        footstepTimer -= Time.deltaTime;
 
-        // Verificăm dacă ținem Shift pentru sprint
-        float currentSpeed = moveSpeed;
-        if (Input.GetKey(KeyCode.LeftShift))
+        if (footstepTimer <= 0)
         {
-            currentSpeed *= sprintMultiplier;
-        }
+            // Play random footstep sound
+            int randomIndex = Random.Range(0, footstepSounds.Length);
+            footstepAudio.clip = footstepSounds[randomIndex];
+            footstepAudio.pitch = Random.Range(0.9f, 1.1f);
+            footstepAudio.Play();
 
-        // Mișcăm player-ul (păstrăm velocity-ul pe Y pentru gravity)
-        Vector3 velocity = direction * currentSpeed;
-        velocity.y = rb.linearVelocity.y; // Păstrăm gravity
-        rb.linearVelocity = velocity;
+            // Reset timer based on speed
+            float interval = IsSprinting ? footstepInterval * 0.6f : footstepInterval;
+            footstepTimer = interval;
+        }
     }
 
-    void HandleMouseLook()
+    public void SetCanMove(bool value)
     {
-        // Input mouse
-        float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity;
-        float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity;
+        canMove = value;
+        if (!canMove)
+        {
+            moveDirection = Vector3.zero;
+            IsSprinting = false;
+            IsMoving = false;
+        }
+    }
 
-        // ROTAȚIE ORIZONTALĂ (stânga/dreapta) - rotăm întreg player-ul
-        transform.Rotate(Vector3.up * mouseX);
-
-        // ROTAȚIE VERTICALĂ (sus/jos) - rotăm doar camera
-        verticalRotation -= mouseY; // Minus ca să fie natural (mouse sus = privire sus)
-        verticalRotation = Mathf.Clamp(verticalRotation, -90f, 90f); // Limităm ca să nu dai flip
-
-        cameraTransform.localEulerAngles = new Vector3(verticalRotation, 0f, 0f);
+    public void AddStamina(float amount)
+    {
+        currentStamina = Mathf.Min(currentStamina + amount, maxStamina);
     }
 }

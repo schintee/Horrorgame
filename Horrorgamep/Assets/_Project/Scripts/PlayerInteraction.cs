@@ -1,125 +1,111 @@
 using UnityEngine;
-using System.Collections.Generic;
 
 public class PlayerInteraction : MonoBehaviour
 {
-    [Header("Interaction Settings")]
-    [SerializeField] private float interactionRange = 3f;  // Cât de departe po?i interac?iona
-    [SerializeField] private Camera playerCamera;          // Camera player-ului
-    [SerializeField] private KeyCode interactionKey = KeyCode.E;  // Tasta pentru pickup
+    [Header("Settings")]
+    [SerializeField] private float interactionRange = 5f;
+    [SerializeField] private Camera playerCamera;
+    [SerializeField] private KeyCode interactKey = KeyCode.E;
+    [Tooltip("Optional: limit what the raycast can hit. Leave as Everything if unsure.")]
+    [SerializeField] private LayerMask pickupLayerMask = ~0;
 
-    // Inventar simplu - list? de obiecte
-    private List<string> inventory = new List<string>();
-
-    // Obiectul pe care ne uit?m acum
+    private PlayerInventory playerInventory;
     private GameObject currentLookingAt;
 
-    void Start()
+    private void Start()
     {
-        // G?sim camera automat dac? nu e setat?
         if (playerCamera == null)
         {
             playerCamera = GetComponentInChildren<Camera>();
         }
+
+        if (playerCamera == null)
+        {
+            playerCamera = Camera.main;
+        }
+
+        // Prefer inventory on the player root (covers the case where collider is on a child)
+        playerInventory = GetComponentInParent<PlayerInventory>();
+        if (playerInventory == null)
+        {
+            playerInventory = GetComponent<PlayerInventory>();
+        }
+
+        if (playerInventory == null)
+        {
+            Debug.LogWarning("[PlayerInteraction] No PlayerInventory found on player. Pickups will not grant keys.");
+        }
     }
 
-    void Update()
+    private void Update()
     {
-        // Verific?m dac? ne uit?m la un obiect pickup
         CheckForPickup();
 
-        // Dac? ap?s?m E ?i ne uit?m la ceva
-        if (Input.GetKeyDown(interactionKey) && currentLookingAt != null)
+        if (Input.GetKeyDown(interactKey) && currentLookingAt != null)
         {
             TryPickup();
         }
-
-        // Debug - vezi inventarul cu I
-        if (Input.GetKeyDown(KeyCode.I))
-        {
-            ShowInventory();
-        }
     }
 
-    void CheckForPickup()
+    private void CheckForPickup()
     {
-        // Raycast din mijlocul ecranului
+        if (playerCamera == null)
+        {
+            currentLookingAt = null;
+            return;
+        }
+
         Ray ray = playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
         RaycastHit hit;
 
-        if (Physics.Raycast(ray, out hit, interactionRange))
+        if (Physics.Raycast(ray, out hit, interactionRange, pickupLayerMask, QueryTriggerInteraction.Ignore))
         {
-            // Verific?m dac? obiectul are tag-ul Pickup
             if (hit.collider.CompareTag("Pickup"))
             {
                 currentLookingAt = hit.collider.gameObject;
 
-                // Afi??m în console (mai târziu facem UI)
                 PickupItem item = currentLookingAt.GetComponent<PickupItem>();
                 if (item != null)
                 {
-                    Debug.Log("Press E to pick up: " + item.GetItemName());
+                    // Temporary prompt in Console (replace with UI later)
+                    Debug.Log($"Press {interactKey}: {item.GetItemName()}");
                 }
-            }
-            else
-            {
-                currentLookingAt = null;
+
+                return;
             }
         }
-        else
-        {
-            currentLookingAt = null;
-        }
+
+        currentLookingAt = null;
     }
 
-    void TryPickup()
+    private void TryPickup()
     {
+        if (currentLookingAt == null) return;
+
         PickupItem item = currentLookingAt.GetComponent<PickupItem>();
-        if (item != null)
+        if (item == null) return;
+
+        if (playerInventory == null)
         {
-            // Adaug? în inventar
-            string itemName = item.GetItemName();
-            string itemType = item.GetItemType();
-
-            inventory.Add(itemType);  // Salv?m tipul pentru puzzle-uri
-
-            Debug.Log("Picked up: " + itemName);
-
-            // Distruge obiectul din scen?
-            Destroy(currentLookingAt);
-            currentLookingAt = null;
+            Debug.LogWarning($"[PlayerInteraction] Tried to pick up '{item.GetItemName()}' but PlayerInventory is missing.");
+            return;
         }
+
+        // We treat PickupItem.itemType as a key id (same id used by Door.requiredKey)
+        playerInventory.AddKey(item.GetItemType());
+
+        Debug.Log($"Picked up: {item.GetItemName()} (key id: {item.GetItemType()})");
+
+        Destroy(currentLookingAt);
+        currentLookingAt = null;
     }
 
-    void ShowInventory()
-    {
-        Debug.Log("=== INVENTORY ===");
-        if (inventory.Count == 0)
-        {
-            Debug.Log("Empty");
-        }
-        else
-        {
-            foreach (string item in inventory)
-            {
-                Debug.Log("- " + item);
-            }
-        }
-    }
+    // Convenience wrappers (optional)
+    public bool HasKey(string keyId) => playerInventory != null && playerInventory.HasKey(keyId);
 
-    // Func?ie public? pentru puzzle-uri - verific? dac? ai un item
-    public bool HasItem(string itemType)
+    public void RemoveKey(string keyId)
     {
-        return inventory.Contains(itemType);
-    }
-
-    // Func?ie pentru a folosi/consuma un item
-    public void UseItem(string itemType)
-    {
-        if (inventory.Contains(itemType))
-        {
-            inventory.Remove(itemType);
-            Debug.Log("Used item: " + itemType);
-        }
+        if (playerInventory != null)
+            playerInventory.RemoveKey(keyId);
     }
 }
