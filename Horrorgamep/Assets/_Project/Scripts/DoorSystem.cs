@@ -14,7 +14,7 @@ public class Door : MonoBehaviour
     [SerializeField] private LayerMask playerLayer;
 
     [Tooltip("Daca e TRUE, cand usa e deschisa se ignora TOATE coliziunile cu playerul.")]
-    [SerializeField] private bool ignorePlayerCollisionWhenOpen = true;
+    [SerializeField] private bool ignorePlayerCollisionWhenOpen = false; // SCHIMBAT LA FALSE BY DEFAULT
 
     [Header("Enemy Rules")]
     [SerializeField] private bool enemyAlwaysPassThrough = true;
@@ -82,6 +82,23 @@ public class Door : MonoBehaviour
 
         doorColliders = GetComponentsInChildren<Collider>(true);
 
+        Debug.Log($"[Door '{gameObject.name}'] Găsite {doorColliders.Length} collidere", this);
+
+        // Verifică dacă sunt trigger
+        foreach (var col in doorColliders)
+        {
+            if (col != null)
+            {
+                Debug.Log($"[Door '{gameObject.name}'] Collider '{col.name}': IsTrigger={col.isTrigger}", this);
+
+                // IMPORTANT: Asigură-te că nu e trigger!
+                if (col.isTrigger)
+                {
+                    Debug.LogWarning($"[Door '{gameObject.name}'] ATENȚIE: Collider-ul '{col.name}' este TRIGGER! Ar trebui să fie normal collider!", this);
+                }
+            }
+        }
+
         CachePlayerColliders();
 
         if (enemyAlwaysPassThrough)
@@ -102,12 +119,13 @@ public class Door : MonoBehaviour
         closedPosition = doorTransform.localPosition;
         closedRotation = doorTransform.localRotation;
 
-        ApplyCollisionIgnoreState();
-
-        if (debugMode)
-        {
-            Debug.Log($"[Door] {gameObject.name} initialized. Locked: {isLocked}, Required Key: '{requiredKey}'", this);
-        }
+        Debug.Log($"[Door '{gameObject.name}'] === CONFIGURARE ===", this);
+        Debug.Log($"  - IsLocked: {isLocked}", this);
+        Debug.Log($"  - RequiredKey: '{requiredKey}'", this);
+        Debug.Log($"  - RequiredKey (normalized): '{Normalize(requiredKey)}'", this);
+        Debug.Log($"  - SlideOpen: {slideOpen}", this);
+        Debug.Log($"  - OpenSpeed: {openSpeed}", this);
+        Debug.Log($"  - IgnorePlayerCollision: {ignorePlayerCollisionWhenOpen}", this);
     }
 
     private void CachePlayerColliders()
@@ -120,107 +138,145 @@ public class Door : MonoBehaviour
         }
 
         playerColliders = player.GetComponentsInChildren<Collider>(true);
+        Debug.Log($"[Door '{gameObject.name}'] Găsite {playerColliders.Length} collidere pe Player", this);
     }
 
     public void Interact()
     {
-        if (isMoving) return;
+        Debug.Log($"[Door '{gameObject.name}'] ========== INTERACT APELAT ==========", this);
+        Debug.Log($"  - isMoving: {isMoving}", this);
+        Debug.Log($"  - isOpen: {isOpen}", this);
+        Debug.Log($"  - isLocked: {isLocked}", this);
 
+        if (isMoving)
+        {
+            Debug.Log("[Door] BLOCAT: Usa se mișcă deja!", this);
+            return;
+        }
+
+        // Dacă e deschisă, închide-o
+        if (isOpen)
+        {
+            Debug.Log("[Door] Usa e deschisă → o închid", this);
+            Close();
+            return;
+        }
+
+        // Dacă e blocată, verifică cheia
         if (isLocked)
         {
+            Debug.Log("[Door] Usa e LOCKED, verific cheia...", this);
+
             string req = Normalize(requiredKey);
+            Debug.Log($"  - Required key (normalized): '{req}'", this);
 
-            if (!string.IsNullOrEmpty(req))
+            if (string.IsNullOrEmpty(req))
             {
-                if (!TryUnlock(req))
-                {
-                    string nice = NiceKeyName(req);
-                    Debug.Log($"[Door] USA E BLOCATA! Ai nevoie de: {nice}", this);
-
-                    if (InventorySystem.Instance != null)
-                        InventorySystem.Instance.ShowWrongKeyMessage(nice);
-
-                    PlayLockedSound();
-                    return;
-                }
-            }
-            else
-            {
-                Debug.Log("[Door] USA E BLOCATA (fără cheie specifică)", this);
+                Debug.Log("[Door] BLOCAT: Usa e locked permanent (fără cheie)", this);
                 PlayLockedSound();
                 return;
             }
+
+            // Verifică dacă playerul are cheia necesară
+            if (!HasRequiredKey(req))
+            {
+                string nice = NiceKeyName(req);
+                Debug.Log($"[Door] BLOCAT: ✗ NU ai cheia '{req}'!", this);
+
+                if (InventorySystem.Instance != null)
+                    InventorySystem.Instance.ShowWrongKeyMessage(nice);
+
+                PlayLockedSound();
+                return;
+            }
+
+            // Are cheia! Deschide usa
+            Debug.Log($"[Door] ✓✓✓ AI CHEIA '{req}'! Unlock și deschid usa!", this);
+            isLocked = false; // Unlock
         }
 
-        if (isOpen) Close();
-        else Open();
+        // Deschide usa
+        Debug.Log("[Door] → Apelez Open()", this);
+        Open();
     }
 
-    private bool TryUnlock(string normalizedRequiredKey)
+    private bool HasRequiredKey(string normalizedRequiredKey)
     {
-        // Metodă 1: Caută în toată scena
-        PlayerInventory[] allInventories = FindObjectsOfType<PlayerInventory>();
+        Debug.Log($"[Door '{gameObject.name}'] === VERIFIC CHEIA '{normalizedRequiredKey}' ===", this);
 
-        if (debugMode)
+        if (string.IsNullOrEmpty(normalizedRequiredKey))
         {
-            Debug.Log($"[Door] Găsite {allInventories.Length} PlayerInventory în scenă", this);
+            Debug.Log("[Door] RequiredKey este gol → FALSE", this);
+            return false;
         }
+
+        // Caută PlayerInventory
+        PlayerInventory[] allInventories = FindObjectsOfType<PlayerInventory>();
+        Debug.Log($"[Door] Găsite {allInventories.Length} PlayerInventory în scenă", this);
 
         foreach (PlayerInventory inv in allInventories)
         {
             if (inv != null)
             {
-                bool hasKey = inv.HasKey(normalizedRequiredKey);
+                Debug.Log($"[Door] Verific inventar pe '{inv.gameObject.name}'...", this);
 
-                if (debugMode)
+                if (inv.HasKey(normalizedRequiredKey))
                 {
-                    Debug.Log($"[Door] Verific PlayerInventory pe '{inv.gameObject.name}' pentru cheia '{normalizedRequiredKey}' - Găsită: {hasKey}", this);
-                }
-
-                if (hasKey)
-                {
-                    Debug.Log($"[Door] ✓ Cheia '{normalizedRequiredKey}' GĂSITĂ! Deschid ușa!", this);
-                    Unlock();
+                    Debug.Log($"[Door] ✓✓✓ CHEIA '{normalizedRequiredKey}' GĂSITĂ!", this);
                     return true;
                 }
             }
         }
 
-        // Metodă 2: Caută prin InventorySystem (UI)
+        // Verifică și în UI inventory
         if (InventorySystem.Instance != null)
         {
-            bool hasInUI = InventorySystem.Instance.HasItem(normalizedRequiredKey);
-            if (debugMode)
-            {
-                Debug.Log($"[Door] Verific InventorySystem UI pentru '{normalizedRequiredKey}' - Găsită: {hasInUI}", this);
-            }
+            Debug.Log("[Door] Verific și în InventorySystem UI...", this);
 
-            if (hasInUI)
+            if (InventorySystem.Instance.HasItem(normalizedRequiredKey))
             {
-                Debug.Log($"[Door] ✓ Cheia '{normalizedRequiredKey}' găsită în UI! Deschid ușa!", this);
-                Unlock();
+                Debug.Log($"[Door] ✓✓✓ CHEIA '{normalizedRequiredKey}' GĂSITĂ în UI!", this);
                 return true;
             }
         }
 
-        Debug.Log($"[Door] ✗ Cheia '{normalizedRequiredKey}' NU a fost găsită nicăieri!", this);
+        Debug.Log($"[Door] ✗✗✗ CHEIA '{normalizedRequiredKey}' NU EXISTĂ!", this);
         return false;
     }
 
-    public void Unlock() => isLocked = false;
+    public void Unlock()
+    {
+        isLocked = false;
+        Debug.Log("[Door] Unlock() apelat manual", this);
+    }
 
     public void Open()
     {
-        if (isOpen || isMoving) return;
+        Debug.Log($"[Door '{gameObject.name}'] Open() apelat. isOpen={isOpen}, isMoving={isMoving}", this);
+
+        if (isOpen)
+        {
+            Debug.Log("[Door] Deja deschisă, skip", this);
+            return;
+        }
+
+        if (isMoving)
+        {
+            Debug.Log("[Door] Se mișcă deja, skip", this);
+            return;
+        }
 
         if (autoCloseCoroutine != null)
             StopCoroutine(autoCloseCoroutine);
 
+        Debug.Log("[Door] → StartCoroutine(MoveDoor(true))", this);
         StartCoroutine(MoveDoor(true));
     }
 
     public void Close()
     {
+        Debug.Log($"[Door '{gameObject.name}'] Close() apelat", this);
+
         if (!isOpen || isMoving) return;
 
         if (autoCloseCoroutine != null)
@@ -233,10 +289,16 @@ public class Door : MonoBehaviour
     {
         isMoving = true;
 
+        Debug.Log($"[Door '{gameObject.name}'] ►►► ÎNCEP ANIMAȚIE: {(opening ? "OPEN" : "CLOSE")} ◄◄◄", this);
+
         if (doorAudio != null)
         {
             AudioClip clip = opening ? openSound : closeSound;
-            if (clip != null) doorAudio.PlayOneShot(clip);
+            if (clip != null)
+            {
+                doorAudio.PlayOneShot(clip);
+                Debug.Log("[Door] Sunet redat", this);
+            }
         }
 
         float t = 0f;
@@ -246,20 +308,36 @@ public class Door : MonoBehaviour
         Vector3 targetPos = opening ? (closedPosition + openPosition) : closedPosition;
         Quaternion targetRot = opening ? (closedRotation * Quaternion.Euler(openRotation)) : closedRotation;
 
+        Debug.Log($"[Door] Start Pos: {startPos}, Target Pos: {targetPos}", this);
+        Debug.Log($"[Door] Start Rot: {startRot.eulerAngles}, Target Rot: {targetRot.eulerAngles}", this);
+        Debug.Log($"[Door] SlideOpen: {slideOpen}", this);
+
         while (t < 1f)
         {
             t += Time.deltaTime * openSpeed;
 
             if (slideOpen)
+            {
                 doorTransform.localPosition = Vector3.Lerp(startPos, targetPos, t);
+            }
             else
+            {
                 doorTransform.localRotation = Quaternion.Slerp(startRot, targetRot, t);
+            }
 
             yield return null;
         }
 
+        // Finalizare
+        if (slideOpen)
+            doorTransform.localPosition = targetPos;
+        else
+            doorTransform.localRotation = targetRot;
+
         isOpen = opening;
         isMoving = false;
+
+        Debug.Log($"[Door '{gameObject.name}'] ►►► ANIMAȚIE FINALIZATĂ! isOpen={isOpen} ◄◄◄", this);
 
         ApplyCollisionIgnoreState();
 
@@ -272,8 +350,15 @@ public class Door : MonoBehaviour
 
     private void ApplyCollisionIgnoreState()
     {
-        if (!ignorePlayerCollisionWhenOpen) return;
+        if (!ignorePlayerCollisionWhenOpen)
+        {
+            Debug.Log("[Door] ignorePlayerCollisionWhenOpen=FALSE, nu modific coliziunile", this);
+            return;
+        }
+
         if (playerColliders == null || doorColliders == null) return;
+
+        Debug.Log($"[Door] Setez coliziuni: {(isOpen ? "IGNORE" : "ENABLE")}", this);
 
         foreach (Collider doorCol in doorColliders)
         {

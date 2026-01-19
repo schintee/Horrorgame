@@ -3,26 +3,42 @@ using UnityEngine.UI;
 
 public class UIManager : MonoBehaviour
 {
+    public static UIManager Instance { get; private set; }
+
     [Header("HUD Elements")]
-    [SerializeField] private Image staminaBar;
     [SerializeField] private Image batteryBar;
     [SerializeField] private Text puzzleCounter;
-    [SerializeField] private GameObject lowStaminaWarning;
     [SerializeField] private GameObject lowBatteryWarning;
 
+    [Header("Enemy Health Bar")]
+    [SerializeField] private GameObject enemyHealthPanel;
+    [SerializeField] private Image enemyHealthBar;
+    [SerializeField] private Text enemyNameText;
+
     [Header("Warning Thresholds")]
-    [SerializeField] private float lowStaminaThreshold = 0.3f;
     [SerializeField] private float lowBatteryThreshold = 0.2f;
 
     [Header("Fade Settings")]
     [SerializeField] private Image fadeImage;
     [SerializeField] private float fadeSpeed = 1f;
 
-    private PlayerController playerController;
     private LanternSystem lanternSystem;
     private PuzzleManager puzzleManager;
+    private EnemyHealth currentEnemy;
 
     private bool isFading = false;
+
+    void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
 
     void Start()
     {
@@ -30,15 +46,14 @@ public class UIManager : MonoBehaviour
         GameObject player = GameObject.FindGameObjectWithTag("Player");
         if (player != null)
         {
-            playerController = player.GetComponent<PlayerController>();
             lanternSystem = player.GetComponent<LanternSystem>();
         }
 
         puzzleManager = PuzzleManager.Instance;
 
         // Hide warnings
-        if (lowStaminaWarning != null) lowStaminaWarning.SetActive(false);
         if (lowBatteryWarning != null) lowBatteryWarning.SetActive(false);
+        if (enemyHealthPanel != null) enemyHealthPanel.SetActive(false);
 
         // Start with fade in
         if (fadeImage != null)
@@ -49,26 +64,10 @@ public class UIManager : MonoBehaviour
 
     void Update()
     {
-        UpdateStaminaBar();
         UpdateBatteryBar();
         UpdatePuzzleCounter();
         UpdateWarnings();
-    }
-
-    private void UpdateStaminaBar()
-    {
-        if (staminaBar == null || playerController == null) return;
-
-        float targetFill = playerController.StaminaPercent;
-        staminaBar.fillAmount = Mathf.Lerp(staminaBar.fillAmount, targetFill, Time.deltaTime * 5f);
-
-        // Color based on stamina
-        if (targetFill < 0.3f)
-            staminaBar.color = Color.red;
-        else if (targetFill < 0.6f)
-            staminaBar.color = Color.yellow;
-        else
-            staminaBar.color = Color.green;
+        UpdateEnemyHealthBar();
     }
 
     private void UpdateBatteryBar()
@@ -96,19 +95,51 @@ public class UIManager : MonoBehaviour
 
     private void UpdateWarnings()
     {
-        // Stamina warning
-        if (lowStaminaWarning != null && playerController != null)
-        {
-            bool showWarning = playerController.StaminaPercent < lowStaminaThreshold;
-            lowStaminaWarning.SetActive(showWarning);
-        }
-
         // Battery warning
         if (lowBatteryWarning != null && lanternSystem != null)
         {
             bool showWarning = lanternSystem.BatteryPercent < lowBatteryThreshold && lanternSystem.IsOn;
             lowBatteryWarning.SetActive(showWarning);
         }
+    }
+
+    // === ENEMY HEALTH BAR ===
+    public void ShowEnemyHealth(EnemyHealth enemy)
+    {
+        if (enemyHealthPanel == null) return;
+
+        currentEnemy = enemy;
+        enemyHealthPanel.SetActive(true);
+
+        if (enemyNameText != null)
+        {
+            enemyNameText.text = enemy.gameObject.name;
+        }
+    }
+
+    public void HideEnemyHealth()
+    {
+        if (enemyHealthPanel != null)
+        {
+            enemyHealthPanel.SetActive(false);
+        }
+        currentEnemy = null;
+    }
+
+    private void UpdateEnemyHealthBar()
+    {
+        if (currentEnemy == null || enemyHealthBar == null) return;
+
+        float targetFill = currentEnemy.GetHealthPercent();
+        enemyHealthBar.fillAmount = Mathf.Lerp(enemyHealthBar.fillAmount, targetFill, Time.deltaTime * 10f);
+
+        // Color based on health
+        if (targetFill < 0.3f)
+            enemyHealthBar.color = Color.red;
+        else if (targetFill < 0.6f)
+            enemyHealthBar.color = Color.yellow;
+        else
+            enemyHealthBar.color = Color.green;
     }
 
     // Fade effects
@@ -193,9 +224,11 @@ public class Crosshair : MonoBehaviour
     [SerializeField] private Image crosshairImage;
     [SerializeField] private Color normalColor = Color.white;
     [SerializeField] private Color interactColor = Color.green;
+    [SerializeField] private Color enemyColor = Color.red;
     [SerializeField] private float pulseSpeed = 2f;
 
     private bool isOverInteractable = false;
+    private bool isOverEnemy = false;
 
     void Update()
     {
@@ -211,23 +244,32 @@ public class Crosshair : MonoBehaviour
         Ray ray = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
         RaycastHit hit;
 
-        if (Physics.Raycast(ray, out hit, 3f))
+        if (Physics.Raycast(ray, out hit, 5f))
         {
+            // Check enemy
+            EnemyHealth enemy = hit.collider.GetComponent<EnemyHealth>();
+            if (enemy == null) enemy = hit.collider.GetComponentInParent<EnemyHealth>();
+
+            if (enemy != null)
+            {
+                isOverEnemy = true;
+                isOverInteractable = false;
+                return;
+            }
+
             // Check if interactable
             Door door = hit.collider.GetComponentInParent<Door>();
-
-
             CollectibleItem collectible = hit.collider.GetComponent<CollectibleItem>();
             if (collectible == null) collectible = hit.collider.GetComponentInParent<CollectibleItem>();
-            if (collectible == null) collectible = hit.collider.GetComponentInChildren<CollectibleItem>();
-
             KeyPickup key = hit.collider.GetComponent<KeyPickup>();
 
             isOverInteractable = (door != null || collectible != null || key != null);
+            isOverEnemy = false;
         }
         else
         {
             isOverInteractable = false;
+            isOverEnemy = false;
         }
     }
 
@@ -235,9 +277,18 @@ public class Crosshair : MonoBehaviour
     {
         if (crosshairImage == null) return;
 
-        Color targetColor = isOverInteractable ? interactColor : normalColor;
+        Color targetColor = normalColor;
 
-        if (isOverInteractable)
+        if (isOverEnemy)
+        {
+            targetColor = enemyColor;
+        }
+        else if (isOverInteractable)
+        {
+            targetColor = interactColor;
+        }
+
+        if (isOverInteractable || isOverEnemy)
         {
             // Pulse effect
             float pulse = Mathf.PingPong(Time.time * pulseSpeed, 1f);

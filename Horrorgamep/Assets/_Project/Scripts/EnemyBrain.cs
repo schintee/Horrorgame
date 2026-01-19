@@ -10,28 +10,21 @@ public class EnemyBrain : MonoBehaviour
 
     [Header("Patrol")]
     [SerializeField] private Transform[] patrolPoints;
-    [SerializeField] private float patrolSpeed = 2.2f;
+    [SerializeField] private float patrolSpeed = 1.6f;
 
     [Header("Chase")]
     [SerializeField] private float detectionRadius = 15f;
-    [SerializeField] private float chaseSpeed = 4.5f;
+    [SerializeField] private float chaseSpeed = 2.6f;   // MAI LENT
     [SerializeField] private float fieldOfView = 140f;
     [SerializeField] private LayerMask obstacleLayer;
 
     [Header("Catch (RESPAWN)")]
-    [SerializeField] private float catchDistance = 2f;
-    [SerializeField] private float catchHoldTime = 1f;
+    [SerializeField] private float catchDistance = 1.6f; // MAI SIGUR
+    [SerializeField] private float catchHoldTime = 0.8f;
 
-    [Tooltip("Unde respawneaza playerul cand e prins")]
     [SerializeField] private Transform respawnPoint;
-
-    [Tooltip("Canvas-ul care apare cand e respawn (SetActive(false) by default)")]
     [SerializeField] private GameObject respawnCanvas;
-
-    [Tooltip("Cat timp sta pe ecran canvas-ul de respawn")]
-    [SerializeField] private float respawnCanvasTime = 1.5f;
-
-    [Tooltip("Cooldown ca sa nu te prinda imediat dupa respawn")]
+    [SerializeField] private float respawnCanvasTime = 1.2f;
     [SerializeField] private float catchCooldown = 1.5f;
 
     [Header("Debug")]
@@ -46,6 +39,10 @@ public class EnemyBrain : MonoBehaviour
     void Awake()
     {
         if (agent == null) agent = GetComponent<NavMeshAgent>();
+
+        // IMPORTANT: sincronizam agentul cu catch-ul
+        agent.stoppingDistance = 0.8f;
+        agent.autoBraking = true;
     }
 
     IEnumerator Start()
@@ -56,20 +53,9 @@ public class EnemyBrain : MonoBehaviour
             if (p != null) player = p.transform;
         }
 
-        if (agent == null)
-        {
-            Debug.LogError("[EnemyBrain] No NavMeshAgent", this);
-            yield break;
-        }
-
         yield return null;
 
-        bool onMesh = EnsureOnNavMesh(6f);
-        if (!onMesh)
-        {
-            if (debugLogs) Debug.LogWarning("[EnemyBrain] Not on NavMesh", this);
-            yield break;
-        }
+        if (!EnsureOnNavMesh(6f)) yield break;
 
         agent.speed = patrolSpeed;
 
@@ -91,15 +77,14 @@ public class EnemyBrain : MonoBehaviour
         }
 
         if (agent == null || !agent.enabled || !agent.isOnNavMesh) return;
+        if (player == null) return;
 
-        if (player == null)
-        {
-            GameObject p = GameObject.FindGameObjectWithTag("Player");
-            if (p != null) player = p.transform;
-            else return;
-        }
+        // DISTANTA PE PLAN (fara Y)
+        Vector3 a = transform.position;
+        Vector3 b = player.position;
+        a.y = 0; b.y = 0;
+        float dist = Vector3.Distance(a, b);
 
-        float dist = Vector3.Distance(transform.position, player.position);
         bool seesPlayer = CanSeePlayer(dist);
 
         if (!chasing && seesPlayer)
@@ -134,43 +119,39 @@ public class EnemyBrain : MonoBehaviour
         }
     }
 
+    private bool CanSeePlayer(float distanceToPlayer)
+    {
+        if (!chasing && distanceToPlayer > detectionRadius)
+            return false;
+
+        Vector3 eye = transform.position + Vector3.up * 1.6f;
+        Vector3 target = player.position + Vector3.up * 1.2f;
+        Vector3 dir = (target - eye).normalized;
+
+        float angle = Vector3.Angle(transform.forward, dir);
+        if (angle > fieldOfView * 0.5f)
+            return false;
+
+        // DOAR OBSTACOLE (NU PLAYER)
+        if (Physics.Raycast(eye, dir, distanceToPlayer, obstacleLayer, QueryTriggerInteraction.Ignore))
+            return false;
+
+        return true;
+    }
+
     private IEnumerator RespawnPlayerRoutine()
     {
         if (respawning) yield break;
         respawning = true;
 
-        if (debugLogs) Debug.Log("[EnemyBrain] CAUGHT -> FULL RESET + RESPAWN", this);
-
         chasing = false;
         catchTimer = 0f;
 
-        // 1) RESET KEY INVENTORY (doors)
-        var inv = player.GetComponentInParent<PlayerInventory>();
-        if (inv != null) inv.ResetInventory();
-
-        // 2) RESET UI INVENTORY (items shown in inventory panel)
-        if (InventorySystem.Instance != null)
-            InventorySystem.Instance.ClearInventory();
-
-        // 3) RESET collected counter in GameManager (optional but recommended)
-        if (GameManager.Instance != null)
-            GameManager.Instance.ResetCollectedObjects();
-
-        // 4) RESPAWN ALL COLLECTIBLES (bring them back in scene)
-        foreach (var c in FindObjectsOfType<CollectibleItem>(true))
-            c.ResetItem();
-
-        // 5) RESPAWN ALL KEYS
-        foreach (var k in FindObjectsOfType<KeyPickup>(true))
-            k.ResetKey();
-
-        // UI feedback
         if (respawnCanvas != null)
             respawnCanvas.SetActive(true);
 
         yield return new WaitForSeconds(respawnCanvasTime);
 
-        // teleport player
         if (respawnPoint != null)
         {
             var cc = player.GetComponent<CharacterController>();
@@ -180,10 +161,6 @@ public class EnemyBrain : MonoBehaviour
             player.rotation = respawnPoint.rotation;
 
             if (cc != null) cc.enabled = true;
-        }
-        else
-        {
-            Debug.LogWarning("[EnemyBrain] RespawnPoint is NULL - set it in Inspector!", this);
         }
 
         if (respawnCanvas != null)
@@ -203,44 +180,17 @@ public class EnemyBrain : MonoBehaviour
         if (!agent.enabled) return false;
         if (agent.isOnNavMesh) return true;
 
-        NavMeshHit hit;
-        if (NavMesh.SamplePosition(transform.position, out hit, maxDistance, NavMesh.AllAreas))
+        if (NavMesh.SamplePosition(transform.position, out NavMeshHit hit, maxDistance, NavMesh.AllAreas))
         {
             agent.Warp(hit.position);
-            if (debugLogs) Debug.Log($"[EnemyBrain] Warped to {hit.position}", this);
             return agent.isOnNavMesh;
         }
-
         return false;
-    }
-
-    private bool CanSeePlayer(float distanceToPlayer)
-    {
-        if (!chasing && distanceToPlayer > detectionRadius)
-            return false;
-
-        Vector3 eye = transform.position + Vector3.up * 1.6f;
-        Vector3 target = player.position + Vector3.up * 1.2f;
-        Vector3 dir = (target - eye).normalized;
-
-        float angle = Vector3.Angle(transform.forward, dir);
-        if (angle > fieldOfView * 0.5f)
-            return false;
-
-        if (Physics.Raycast(eye, dir, distanceToPlayer, obstacleLayer, QueryTriggerInteraction.Ignore))
-            return false;
-
-        return true;
     }
 
     private void GoNextPatrol()
     {
-        if (agent == null || !agent.enabled || !agent.isOnNavMesh) return;
-        if (patrolPoints == null || patrolPoints.Length == 0) return;
-
         patrolIndex = (patrolIndex + 1) % patrolPoints.Length;
         agent.SetDestination(patrolPoints[patrolIndex].position);
-
-        if (debugLogs) Debug.Log($"[EnemyBrain] Patrol -> {patrolPoints[patrolIndex].name}", this);
     }
 }
