@@ -214,8 +214,13 @@ public class Crosshair : MonoBehaviour
         if (Physics.Raycast(ray, out hit, 3f))
         {
             // Check if interactable
-            Door door = hit.collider.GetComponent<Door>();
-            Collectible collectible = hit.collider.GetComponent<Collectible>();
+            Door door = hit.collider.GetComponentInParent<Door>();
+
+
+            CollectibleItem collectible = hit.collider.GetComponent<CollectibleItem>();
+            if (collectible == null) collectible = hit.collider.GetComponentInParent<CollectibleItem>();
+            if (collectible == null) collectible = hit.collider.GetComponentInChildren<CollectibleItem>();
+
             KeyPickup key = hit.collider.GetComponent<KeyPickup>();
 
             isOverInteractable = (door != null || collectible != null || key != null);

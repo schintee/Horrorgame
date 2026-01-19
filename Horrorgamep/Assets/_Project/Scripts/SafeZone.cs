@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using System.Collections.Generic;
 
 public class SafeZone : MonoBehaviour
@@ -20,8 +20,6 @@ public class SafeZone : MonoBehaviour
     [SerializeField] private AudioClip exitSound;
 
     [Header("Restoration")]
-    [SerializeField] private bool restoreStamina = true;
-    [SerializeField] private float staminaRestoreRate = 20f;
     [SerializeField] private bool restoreBattery = true;
     [SerializeField] private float batteryRestoreRate = 15f;
 
@@ -78,11 +76,7 @@ public class SafeZone : MonoBehaviour
 
     private void RestorePlayerResources()
     {
-        if (restoreStamina && playerInZone != null)
-        {
-            playerInZone.AddStamina(staminaRestoreRate * Time.deltaTime);
-        }
-
+        // Doar Battery restore (stamina a fost eliminată)
         if (restoreBattery && lanternInZone != null)
         {
             lanternInZone.AddBattery(batteryRestoreRate * Time.deltaTime);

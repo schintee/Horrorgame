@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.Events;
 using System.Collections.Generic;
 
@@ -64,7 +64,9 @@ public class CollectiblePuzzle : PuzzleBase
 {
     [Header("Collectible Settings")]
     [SerializeField] private int requiredCollectibles = 3;
-    [SerializeField] private List<Collectible> collectibles = new List<Collectible>();
+
+    // Uses CollectibleItem (your existing pickup script) instead of a missing Collectible class
+    [SerializeField] private List<CollectibleItem> collectibles = new List<CollectibleItem>();
 
     private int collectedCount = 0;
 
@@ -72,17 +74,20 @@ public class CollectiblePuzzle : PuzzleBase
     {
         base.Start();
 
-        // Register all collectibles
-        foreach (var collectible in collectibles)
+        // Register listeners that detect when CollectibleItem was collected (without modifying CollectibleItem)
+        foreach (var item in collectibles)
         {
-            if (collectible != null)
-            {
-                collectible.OnCollected.AddListener(OnCollectibleCollected);
-            }
+            if (item == null) continue;
+
+            var listener = item.gameObject.GetComponent<CollectibleCollectedListener>();
+            if (listener == null)
+                listener = item.gameObject.AddComponent<CollectibleCollectedListener>();
+
+            listener.Bind(item, this);
         }
     }
 
-    private void OnCollectibleCollected()
+    internal void NotifyCollectedOnce()
     {
         collectedCount++;
 
@@ -97,13 +102,57 @@ public class CollectiblePuzzle : PuzzleBase
         collectedCount = 0;
         isCompleted = false;
 
-        foreach (var collectible in collectibles)
+        foreach (var item in collectibles)
         {
-            if (collectible != null)
+            if (item != null)
             {
-                collectible.ResetCollectible();
+                item.ResetItem();
             }
         }
+    }
+}
+
+/// <summary>
+/// Helper component: watches CollectibleItem's private "isCollected" flag via reflection,
+/// so we don't have to change CollectibleItem.
+/// </summary>
+public class CollectibleCollectedListener : MonoBehaviour
+{
+    private CollectibleItem item;
+    private CollectiblePuzzle puzzle;
+    private bool fired;
+
+    private System.Reflection.FieldInfo isCollectedField;
+
+    public void Bind(CollectibleItem item, CollectiblePuzzle puzzle)
+    {
+        this.item = item;
+        this.puzzle = puzzle;
+        fired = false;
+
+        // cache reflection
+        isCollectedField = typeof(CollectibleItem).GetField(
+            "isCollected",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic
+        );
+    }
+
+    private void Update()
+    {
+        if (fired || item == null || puzzle == null || isCollectedField == null) return;
+
+        bool isCollected = (bool)isCollectedField.GetValue(item);
+        if (isCollected)
+        {
+            fired = true;
+            puzzle.NotifyCollectedOnce();
+        }
+    }
+
+    private void OnEnable()
+    {
+        // allow counting again after ResetItem()
+        fired = false;
     }
 }
 
@@ -270,5 +319,3 @@ public class SwitchPuzzle : PuzzleBase
         isCompleted = false;
     }
 }
-
-

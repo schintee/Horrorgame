@@ -162,8 +162,5 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    public void AddStamina(float amount)
-    {
-        currentStamina = Mathf.Min(currentStamina + amount, maxStamina);
-    }
+  
 }
