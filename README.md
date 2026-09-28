@@ -1,4 +1,4 @@
-# [Hide and Hunt]
+# Hide and Hunt
 
 A first-person stealth / survival horror game built in **Unity**. Explore a dark, door-filled facility with only a battery-powered lantern, collect the mysterious objects scattered around the level, avoid (or fight) patrolling enemies, and escape before you get caught.
 
