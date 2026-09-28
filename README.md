@@ -124,10 +124,7 @@ Assets/
 
 ### Run the project
 
-1. Clone the repository:
-   ```bash
-   git clone <your-repo-url>
-   ```
+1. Clone the repository
 2. Open **Unity Hub** → **Add** → select the project folder.
 3. Open the project with the correct Unity version.
 4. In the Project window, open `Assets/Scenes/MainLevel.unity`.
